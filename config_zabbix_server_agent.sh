@@ -22,9 +22,9 @@ ss -antulp | grep zabbix.server
 #7.设置被监控服务配置
 #vim /usr/local/etc/zabbix_agentd.conf
 #7.1允许哪些主机监控本机
-sed -i '93s/127.0.0.1/192.168.5.8/1' /usr/local/etc/zabbix_agentd.conf
+sed -i '93s/127.0.0.1/192.168.5.4/1' /usr/local/etc/zabbix_agentd.conf
 #7.2允许哪些主机通过主动模式监控本机
-sed -i '134s/127.0.0.1/192.168.5.8/1' /usr/local/etc/zabbix_agentd.conf
+sed -i '134s/127.0.0.1/192.168.5.4/1' /usr/local/etc/zabbix_agentd.conf
 #设置本机主机名
 sed -i '30s/agentd/server/1' /usr/local/etc/zabbix_agentd.conf
 #允许自定义key
