@@ -1,0 +1,458 @@
+***ansible+zabbix
+**zabbix实验环境
+配置环境:
+a.安装LNMP环境
+b.源码安装zabbix
+c.安装监控端主机，修改基本配置
+d.初始化zabbix监控web页面
+e.修改PHP配置文件，满足zabbix需求
+f.安装被监控端主机，修改基本配置
+*主机配置
+主机名		IP地址(eth0)		角色				功能
+Client		192.168.3.154	客户端虚拟机		访问
+eth1:192.168.5.7
+Agent		192.168.5.132	zabbix监控服务器	监控
+eth1:192.168.5.4
+User1		192.168.3.222	zabbix被监控主机	被监控
+eth1:192.168.5.6
+User2		192.168.3.244	zabbix被监控主机	被监控
+eth1:192.168.5.2
+#eth1为后续Web服务做准备
+注释:
+1.利用backup.img后端盘制作虚拟机Agent,User1,User2的前端盘Agent.img,User1.img,User2.img，容量为50G
+2.分别配置两张网卡及其ip
+eg:以虚拟机agent为例
+1>真机执行，config_clone.sh为自动克隆虚拟机脚本
+[root@yewei ~]# config_clone.sh agent
+Formatting 'Agent.img', fmt=qcow2 size=53687091200 backing_file='backup.img' encryption=off cluster_size=65536 lazy_refcounts=off 
+定义域 agent（从 /etc/libvirt/qemu/Agent.xml）
+[root@yewei ~]# virsh start Agent
+[root@yewei ~]# virsh console agent
+2>物理机传输给虚拟机，实现虚拟机自动配置主机名，eth1网卡的脚本
+[root@yewei ~]# vim config_hostname_ifcfgEth1.sh
+#!/bin/bash
+ping -c 2 www.baidu.com
+hostnamectl set-hostname $1
+cp /etc/sysconfig/network-scripts/ifcfg-eth0 /etc/sysconfig/network-scripts/ifcfg-eth1
+sed -i '2s/0/1/1' /etc/sysconfig/network-scripts/ifcfg-eth1
+halt -p
+[root@yewei ~]# vim /root/bin/yewei_virtualMachine.sh
+#!/bin/bash
+scp /root/config_hostname_ifcfgEth1.sh 192.168.$1.$2:/root/bin/
+ssh 192.168.$1.$2
+[root@yewei ~]# yewei_virtualMachine.sh 5 2
+[root@backup ~]# chmod +x /root/bin/config_hostname_ifcfgEth1.sh
+[root@backup ~]# config_hostname_ifcfgEth1.sh user2
+3>重启，查看网卡信息
+[root@agent ~]# ip a
+... ...
+
+**agent虚拟机安装ansible软件
+#用自动化工具ansible如下配置
+a.配置主机名，IP地址，YUM源
+b.修改所有主机的主机名
+c.配置无密码SSH连接
+d.配置NTP时间同步
+*真机配置好网络yum源，给虚拟机提供软件包
+[root@yewei images]# cd /var/ftp/pub/
+[root@yewei images]# mkdir ansible
+[root@yuwei pub]# ls
+ansible-2.4.2.0-2.el7.noarch.rpm
+config_clone.sh
+configip.sh
+config_static_ip.sh
+python2-jmespath-0.9.0-3.el7.noarch.rpm
+python-httplib2-0.9.2-1.el7.noarch.rpm
+python-paramiko-2.1.1-4.el7.noarch.rpm
+python-passlib-1.6.5-2.el7.noarch.rpm
+sshpass-1.06-2.el7.x86_64.rpm
+*虚拟机配置yum源文件
+[root@agent ~]# vim /etc/yum.repos.d/createrepo.repo
+[Createrepo_Source]
+name=Createrepo_Packages
+baseurl=ftp://192.168.5.254/pub/aisible
+enabled=1
+gpgcheck=0
+注释:linux alias永久生效,步骤如下:
+1.配置文件
+[root@yewei ～]# vim /root/.bashrc
+#增加如下:
+alias ys='yum search'
+alias yi='yum -y install'
+alias yca="yum clean all"
+alias yr="yum repolist"
+2.启动生效
+[root@yewei ～]# source /root/.bashrc
+3.测试
+[root@yewei ～]# yi ansible
+**虚拟机配置/etc/hosts
+[root@agent ~]# vim /etc/hosts
+#添加如下内容
+192.168.3.154     client
+192.168.3.132     agent
+192.168.3.222     user1
+192.168.3.244     user2
+*把配置同步到其他虚拟机中
+[root@agent ~]# for i in 154 222 244; do scp /etc/hosts 192.168.3.$i:/etc/; done
+*测试ping情况
+[root@agent ~]# ping -c 2 user1
+PING User1 (192.168.5.5) 56(84) bytes of data.
+64 bytes from User1 (192.168.5.5): icmp_seq=1 ttl=64 time=0.246 ms
+*测试ansible版本信息
+[root@agent ~]# ansible --version
+ansible 2.4.2.0
+... ...
+**ansible工具配置
+*熟悉ansible配置文件
+[root@agent ~]# vim /etc/ansible/ansible.cfg
+ 14 inventory      = /etc/ansible/hosts	//取消注释，功能:主机分组列表
+ 61 host_key_checking = False			//取消注释,功能:第1次后取消yes输入，ansible不必等待
+*定义主机，分组
+[root@agent ~]# vim /etc/ansible/hosts
+[client]	//组名称
+client
+
+[agent]
+agent
+
+[user]
+user[1:2]
+*显示所有组的主机
+[root@agent ~]# ansible all --list-host
+ [WARNING]: Found both group and host with same name: Client
+
+  hosts (3):
+    client
+	agent
+    user1
+    user2
+**配置无密码SSH连接
+[root@agent ~]# cd /root/.ssh/
+[root@agent .ssh]# ssh-keygen -t rsa -b 2048 -N ''
+[root@agent .ssh]# ansible all -m authorized_key -a "user=root exclusive=true manage_dir=true key='$(</root/.ssh/id_rsa.pub)'" -k
+*给本身主机配置密钥
+[root@agent .ssh]# ssh-copy-id Agent
+*测试远程登陆
+[root@agent .ssh]# ssh Client
+Last login: Tue Jan 15 21:29:47 2019 from 192.168.5.4
+[root@client ~]# exit
+**配置NTP时间同步
+*真实物理机作为提供给其它虚拟机的NTP服务器
+[root@yewei ~]# vim /etc/chrony.conf
+  7 server ntp1.aliyun.com iburst
+ 27 allow 192.168.5.0/24
+ 30 local stratum 10
+[root@yewei ~]# systemctl restart chronyd
+[root@yewei ~]# ss -tuanpl | grep chronyd
+udp    UNCONN     0      0         *:123                   *:*                   users:(("chronyd",pid=10744,fd=3))
+udp    UNCONN     0      0      127.0.0.1:323                   *:*                   users:(("chronyd",pid=10744,fd=1))
+udp    UNCONN     0      0       ::1:323                  :::*                   users:(("chronyd",pid=10744,fd=2))
+[root@yewei ~]# systemctl enable chronyd
+*查看真实物理机时间服务参数状态
+[root@yewei ~]# chronyc sources -v
+*虚拟机Agent的NTP配置如下:
+[root@Agent ~]# vim /etc/chrony.conf
+#server 0.centos.pool.ntp.org iburst
+#server 1.centos.pool.ntp.org iburst
+#server 2.centos.pool.ntp.org iburst
+#server 3.centos.pool.ntp.org iburst
+server 192.168.3.1 iburst
+[root@Agent ~]# systemctl restart chronyd
+[root@Agent ~]# systemctl enable chronyd
+[root@yewei ~]# chronyc sources -v
+*Agent的时间服务配置利用自动化工具一键部署到其它虚拟机中
+[root@agent ~]# ansible all -m copy -a 'src=/etc/chrony.conf dest=/etc/'
+[root@agent ~]# ansible all -m service -a 'name=chronyd state=restarted'
+[root@agent ~]# ansible all -m shell -a 'systemctl enable chronyd'
+[root@agent ~]# ansible all -m shell -a 'chronyc sources -v'
+*如果有防火墙规则，需要晴空所有规则
+[root@agent ~]# iptables -F
+[root@agent ~]# ansible all -m shell -a 'iptables -F'
+ [WARNING]: Found both group and host with same name: Client
+
+User1 | SUCCESS | rc=0 >>
+
+
+Client | SUCCESS | rc=0 >>
+
+
+User2 | SUCCESS | rc=0 >>
+
+***安装监控服务器
+**安装部署LNMP环境
+1.安装源码nginx并运行服务
+2.安装mysql并运行服务
+3.安装PHP程序
+4.测试LNMP环境
+*安装nginx
+[root@agent ~]# vim /root/bin/config_nginx.sh
+[root@agent ~]# chmod +x /root/bin/config_nginx.sh
+#!/bin/bash
+#脚本一键安装nginx
+yum clean all
+yum repolist
+yum -y install gcc pcre-devel openssl-devel zlib-devel
+tar -zxf nginx-1.12.2.tar.gz
+cd nginx-1.12.2/
+./configure --with-http_ssl_module
+#./configure --prefix=/usr/local/nginx	//指定安装目录
+make && make install
+[root@agent ~]# config_nginx.sh
+*配置mysqld
+[root@agent ~]# vim /root/bin/config_nginx.sh
+!/bin/bash
+#1.关闭数据库mariadb关系型数据库,避免与安装的mysql关系型数据库冲突
+systemctl stop mariadb
+#2.卸载关系型数据库mariadb的相关软件:
+rpm -e --nodeps mariadb-server mariadb
+#3.删除其相关文件
+rm -rf /etc/my.cnf
+rm -rf /var/lib/mysql/*
+#4.安装mysql软件
+#4.1安装mysql依赖包
+yum -y install perl-JSON libaio* perl*
+#4.2升级安装mysql
+cd mysql_plugin
+tar -xf mysql-5.7.17-1.el7.x86_64.rpm-bundle.tar
+rpm -Uvh mysql-community-*.rpm
+rpm -qa | grep -i mysql
+#5.启动mysql服务
+systemctl start mysqld
+#设置开机自启动mysql服务
+systemctl enable mysqld
+#查看mysql服务进程和端口号
+ps -C mysqld
+[root@agent ~]# chmod +x /root/bin/config_nginx.sh
+[root@agent ~]# config_mysql.sh
+#.数据库服务的基本使用
+1)修改密码策略:
+获取初始密码:grep password /var/log/mysqld.log
+登陆数据库:mysql -hlocalhost -uroot -p'---'
+获取相关密码信息:mysql>show variables like "%password%";	//报错,因首次登入,需更改密码后方能使用
+//修改root口令:如下3步
+只检查密码的长度:mysql>set global validate_password_policy=0;
+密码长度不能小于6个字符:mysql>set global validate_password_length=6;
+重新设置密码:mysql>alter user root@"localhost" identified by "123456";
+退出:mysql>quit
+重新登入数据库:mysql -hlocalhost -uroot -p123456
+让密码策略永久生效
+vim  /etc/my.cnf
+
+[mysqld]
+validate_password_policy=0
+validate_password_length=6
+
+systemctl restart mysqld
+**配置nginx首页
+[root@agent ～]# vim /root/bin/add_config_nginx.sh
+#!/bin/bash
+yum -y install php-fpm-5.4.16-42.el7.x86_64.rpm
+sed -i '65i\
+        fastcgi_buffers 8 16k;\
+        fastcgi_buffer_size 32k;\
+        fastcgi_connect_timeout 300;\
+        fastcgi_send_timeout 300;\
+        fastcgi_read_timeout 300;\
+        location ~ \.php$ {\
+            root           html;\
+            fastcgi_pass   127.0.0.1:9000;\
+            fastcgi_index  index.php;\
+            include        fastcgi.conf;\
+        }' /usr/local/nginx/conf/nginx.conf
+[root@agent ~]# chmod +x /root/bin/add_config_nginx.sh
+[root@agent ~]# add_config_nginx.sh
+**启动nginx,php-fpm服务
+[root@agent ～]# vim /root/bin/start_php-fpm_nginx_service.sh
+#!/bin/bash
+#1.启动nginx服务
+#制作nginx软连接
+ln -s /usr/local/nginx/sbin/nginx /sbin/nginx
+nginx
+#2.启动php-fpm服务
+yum -y install php php-mysql
+systemctl start php-fpm
+systemctl enbale php-fpm
+start_php-fpm_nginx_service.sh
+[root@agent ～]# chmod +x /root/bin/start_php-fpm_nginx_service.sh
+[root@agent ～]# start_php-fpm_nginx_service.sh
+**测试LNMP环境
+服务器创建PHP测试页面,浏览器访问测试网页的连通性
+[root@agent ~]# vim /usr/local/nginx/html/test.php
+<?php
+$i=33;
+echo $i;
+?>
+[root@agent ~]# curl http://192.168.5.4/test.php
+33
+**安装zabbix服务端
+[root@agent ~]# vim /root/bin/config_zabbix_service.sh
+#!/bin/bash
+yum -y install net-snmp-devel curl-devel libevent-devel
+lftp 192.168.5.254
+#如下3条命令需要在终端手动输入
+#cd pub/zabbix
+#get zabbix-3.4.4.tar.gz
+#quit
+tar -xf zabbix-3.4.4.tar.gz   
+cd zabbix-3.4.4/
+./configure --enable-server --enable-proxy --enable-agent --with-mysql=/usr/bin/mysql_config --with-net-snmp --with-libcurl
+make && make install
+[root@agent ～]# chmod +x /root/bin/config_zabbix_service.sh
+[root@agent ～]# config_zabbix_service.sh
+
+***安装zabbix服务
+1.安装zabbix软件
+2.运行服务
+3.访问管理页面
+4.zabbix软件的使用
+
+**部署监控服务器Zabbix Server
+[root@agent ~]# vim /root/bin/config_zabbix_server_agent.sh
+#!/bin/bash
+#1.将zabbix-3.4.4/database/mysql/的数据导入到创建的zabbix库中
+cd zabbix-3.4.4/database/mysql/
+mysql -uzabbix -pcangqiong zabbix < schema.sql
+mysql -uzabbix -pcangqiong zabbix < images.sql
+mysql -uzabbix -pcangqiong zabbix < data.sql
+#2.上线Zabbix的Web页面
+cd /root/zabbix-3.4.4/frontends/php/
+cp -r * /usr/local/nginx/html/
+chmod -R 777 /usr/local/nginx/html/*
+#3.修改Zabbix_server配置文件,设置数据库相关参数,启动Zabbix_server服务
+#vim /usr/local/etc/zabbix_server.conf
+sed -i '85s/^# DB/DB/1' /usr/local/etc/zabbix_server.conf
+sed -i '119s/^# DBP/DBP/1' /usr/local/etc/zabbix_server.conf
+sed -i '119s/DBP.*/&cangqiong/' /usr/local/etc/zabbix_server.conf
+#4.创建用户启动,安全可靠
+useradd -s /sbin/nologin zabbix
+#5.启动服务
+zabbix_server
+#6.确认连接状态,端口10051
+ss -antulp | grep zabbix.server
+#7.设置被监控服务配置
+#vim /usr/local/etc/zabbix_agentd.conf
+#7.1允许哪些主机监控本机
+sed -i '93s/127.0.0.1/192.168.5.4/1' /usr/local/etc/zabbix_agentd.conf
+#7.2允许哪些主机通过主动模式监控本机
+sed -i '134s/127.0.0.1/192.168.5.4/1' /usr/local/etc/zabbix_agentd.conf
+#设置本机主机名
+sed -i '30s/agentd/server/1' /usr/local/etc/zabbix_agentd.conf
+#允许自定义key
+sed -i '280s/^# Un/Un/1' /usr/local/etc/zabbix_agentd.conf
+sed -i '280s/0/1/1' /usr/local/etc/zabbix_agentd.conf
+#启动监控agent
+zabbix_agentd
+#查看端口信息为10050
+ss -ntulp | grep zabbix.agentd
+#浏览器访问Zabbix_server服务器的Web页面
+curl http://192.168.5.4/index.php
+[root@agent ～]# chmod +x /root/bin/config_zabbix_server_agent.sh
+[root@agent ～]# config_zabbix_server_agent.sh
+*第一次访问,初始化PHP页面会检查计算机环境是否满足要求,如果不满足会给出修改建议
+[root@agent ~]# vim /root/bin/config_modify_php_file.sh
+#!/bin/bash
+yum -y install php-gd php-xml php-bcmath php-mbstring
+#设置时区
+sed -i '878s/^;date/date/1' /etc/php.ini 
+sed -i '878s/date.*/& Asia\/Shanghai/' /etc/php.ini
+#最大执行时间,单位:s
+sed -i 's/^max_execution.*/&0/g' /etc/php.ini
+#POST数据最大容量
+sed -i '672s/8/32/1' /etc/php.ini
+#服务器接收数据的时间限制
+sed -i '394s/60/300/1' /etc/php.ini
+#重启php-fpm服务
+systemctl restart php-fpm
+[root@agent ～]# chmod +x /root/bin/config_modify_php_file.sh
+[root@agent ～]# config_modify_php_file.sh
+
+**部署被监控主机
+[root@user1 ~]# vim /root/bin/config_zabbix_agent.sh
+#1.安装依赖包
+yum -y install gcc pcre-devel
+#2.创建zabbix用户,管理zabbix监控软件
+useradd -s /sbin/nologin zabbix
+#3.获取zabbix软件包
+lftp 192.168.5.254
+#3.1解压缩
+tar -xf zabbix-3.4.4.tar.gz
+#3.2源码编译安装
+cd /root/zabbix-3.4.4/
+./configure --enable-agent
+make && make install
+#4.配置agent文件
+#4.1允许哪些主机监控本机
+sed -i '93s/127.0.0.1/192.168.5.4/1' /usr/local/etc/zabbix_agentd.conf
+#4.2允许哪些主机通过主动模式监控本机
+sed -i '134s/127.0.0.1/192.168.5.4/1' /usr/local/etc/zabbix_agentd.conf
+#设置本机log日志文件
+sed -i '30s/agentd/agent1/1' /usr/local/etc/zabbix_agentd.conf
+#允许自定义key
+sed -i '280s/^# Un/Un/1' /usr/local/etc/zabbix_agentd.conf
+sed -i '280s/0/1/1' /usr/local/etc/zabbix_agentd.conf
+#拷贝启动脚本(非必须操作),有启动脚本可以方便管理服务,启动与关闭服务,启动脚本位于源Zabbix源码目录下
+cd /root/zabbix-3.4.4/misc/init.d/fedora/core
+cp zabbix_agentd /etc/init.d/
+/etc/init.d/zabbix_agentd start
+/etc/init.d/zabbix_agentd status
+/etc/init.d/zabbix_agentd restart
+#查看端口信息为10050
+ss -ntulp | grep zabbix.agentd
+[root@user1 ～]# chmod +x /root/bin/config_zabbix_agent.sh
+[root@user1 ～]# config_zabbix_agent.sh
+
+**被监控主机创建自定义key
+[root@user1 ~]# vim /root/bin/config_default_zabbix_project.sh
+#!/bin/bash
+#被监控机器自定义key
+#1.加载自定义key配置文件目录
+sed -i '264s/^# In/In/1' /usr/local/etc/zabbix_agentd.conf
+echo "UserParameter=count.line.passwd,wc -l /etc/passwd | awk '{print \$1}'" > /usr/local/etc/zabbix_agentd.conf.d/count.line.passwd
+#2.测试自定义Key
+#2.1杀死zabbix_agentd进程
+killall zabbix_agentd
+#2.2重启zabbix_agentd服务
+zabbix_agentd
+#2.3由于启动zabbix_agentd服务需要一段时间，所以让机器沉睡5s，以使zabbix_get命令能够顺利执行
+sleep 5
+zabbix_get -s 127.0.0.1 -k count.line.passwd
+[root@user1 ～]# chmod +x /root/bin/config_default_zabbix_project.sh
+[root@user1 ～]# config_default_zabbix_project.sh
+
+
+***测试网页版zabbix监控Web服务
+**1.监控报警
+监控主机192.168.5.8当系统的总用户数量大于46个时发送邮件给本机zabbix@localhost邮箱帐号	//注意:zabbix[创建的用户]@localhost
+**2.在监控服务器192.168.5.4上做如下配置
+1>准备邮箱服务和邮箱帐号
+[root@agent ~]# rpm -q postfix
+[root@agent ~]# netstat -antulp | grep :25
+[root@agent ~]# grep zabbix /etc/passwd
+zabbix:x:1000:1000::/home/zabbix:/sbin/nologin
+[root@agent ~]# yum -y install mail*
+[root@agent ~]# mail -u zabbix
+No mail for zabbix
+[root@agent ~]# mail -s "testmail" zabbix < /etc/hosts
+[root@agent ~]# mail -u zabbix
+Heirloom Mail version 12.5 7/5/10.  Type ? for help.
+"/var/mail/zabbix": 1 message 1 new
+>
+2>创建触发器
+3>创建动作
+4>指定邮件服务器及收件人
+5>测试配置:触发器被触发后查看zabbix用户是否收到邮件:[root@agent ~]# mail -u zabbix
+
+***自动发现的配置步骤:在监控服务器192.168.5.4(agent)上作如下配置 
+1.创建自动发现规则:HTTP-80...
+2.创建Action动作，说明发现主机后自动执行什么动作
+3.通过动作，执行添加主机，链接模板到主机等操作
+4.架设网站服务192.168.5.2
+4.1运行zabbix_agentd：装包，修改配置文件，重新启动服务
+4.2运行httpd服务：装包，启动服务
+5.查看是否监控了网站服务192.168.5.2
+重新登陆到zabbix浏览器查看
+
+
+
+
+
