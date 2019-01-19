@@ -1,0 +1,53 @@
+#配置被监控端,实现主动监控,把被监控的信息主动发送给服务端
+---
+- hosts: client
+  remote_user: root
+  tasks:
+    #一.装包
+    #1.安装依赖包
+    - shell: yum -y install gcc pcre-devel
+    #2.创建zabbix用户,管理zabbix监控软件
+    - shell: useradd -s /sbin/nologin zabbix
+    #3.解压缩zabbix软件包
+    - shell: tar -xf zabbix-3.4.4.tar.gz
+    #4.源码编译安装
+    - shell: /root/zabbix-3.4.4/configure --enable-agent
+    - shell: make && make install
+    #二.修改agent配置文件,实现主动模式
+    #1.注释该行，允许谁监控本机
+    - replace:
+        path: /usr/local/etc/zabbix_agentd.conf
+        regexp: '^(Server=.*)'
+        replace: '#\1'
+    #2.被动监控时启动多个进程，设置为0，则禁止被动监控，不启动zabbix_agentd服务
+    - replace:
+        path: /usr/local/etc/zabbix_agentd.conf
+        regexp: '^# (StartAgents).*'
+        replace: '\1=0'
+    #3.允许哪些主机监控本机(主动模式),一定要取消127.0.0.1
+    - replace:
+        path: /usr/local/etc/zabbix_agentd.conf
+        regexp: '^(ServerActive).*'
+        replace: '\1=192.168.5.4'
+    #4.默认120s检测一次
+    - replace:
+        path: /usr/local/etc/zabbix_agentd.conf
+        regexp: '^# (RefreshActive.*)'
+        replace: '\1'
+    #5.告诉监控服务器，是谁发的数据信息,一定要和zabbix服务器配置的监控主机名一致
+    - replace:
+        path: /usr/local/etc/zabbix_agentd.conf
+        regexp: '^(Hostname).*'
+        replace: '\1=client'
+    #6.允许自定义key
+    - replace:
+        path: /usr/local/etc/zabbix_agentd.conf
+        regexp: '^# (UnsafeUserParameters).*'
+        replace: '\1=1'
+    #三.启动zabbix_agentd服务
+    - shell: /usr/local/sbin/zabbix_agentd
+        ignore_errors: True
+    #3.1查看zabbix_agentd进程
+    - shell: ps -C zabbix_agentd
+    #3.2查看zabbix_agentd终端,如无，则表示正常，因为设置里面关了此项服务
+    - command: netstat -antulp | grep :10050
