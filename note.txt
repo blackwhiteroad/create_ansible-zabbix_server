@@ -3,3 +3,4 @@
 3.Tests nginx command:nginx -t(Tests the state of nginx and returns success if successful)
 :ansible all -m shell -a date
 4.Using the automation tool ansible to check whether the hosts can realize NTP time synchronization:ansible all -m shell -a 'date +%F\%T'
+5.In the yaml file, you can't use a shell control when it comes to having a pipe command to view, you use a command control(在yaml文件中，当涉及到含有查看管道命令时，不能用shell控件，要用command控件)
