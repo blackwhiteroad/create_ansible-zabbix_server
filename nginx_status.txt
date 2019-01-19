@@ -1,0 +1,4 @@
+Active connections: 1 #时时连接总数
+server accepts handled requests
+ 158 158 281 #历史连接总数 处理连接数量 处理的请求数量
+Reading: 0 Writing: 1 Waiting: 0 #0 读处理数量 1 写处理数量 0 等待处理数量
