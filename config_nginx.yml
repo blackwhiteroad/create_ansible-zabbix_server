@@ -1,0 +1,26 @@
+---
+- hosts: user2
+  remote_user: root
+  tasks:
+    - name: Install the nginx dependency package
+      yum:
+        name: gcc,pcre-devel,zlib-devel,openssl-devel
+        state: installed
+    - name: Unzip the nginx
+      shell: tar -zxf /root/nginx-1.12.2.tar.gz
+    - name: Install the nginx plug-in
+      shell: cd /root/nginx-1.12.2
+      cmd: ./configure --with-http_ssl_module --with-http_stub_status_module
+    - name: Compile the installation
+      cmd: make && make install
+    - name: Nginx configuration module
+      replace:
+        path: /usr/local/nginx/conf/nginx.conf
+        gegexp: ''
+        replace: 'location /status { stub_status on; }'
+    - name: Make nginx soft links
+      shell: ln -s /usr/local/nginx/sbin/nginx /sbin/nginx
+    - name: Start nginx
+      shell: nginx
+    - name: Check nginx status
+      shell: nginx -t
