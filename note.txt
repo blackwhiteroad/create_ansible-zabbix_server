@@ -1,1 +1,5 @@
-If you need to customize the zabbix monitoring Key, you need to add the address 127.0.0.1 in the server and serverActive to read the subsequent corresponding data
+1.If you need to customize the zabbix monitoring Key, you need to add the address 127.0.0.1 in the server and serverActive to read the subsequent corresponding data
+2.Turn off the nginx command:nginx -s stop(Make nginx soft links:ln -s /usr/local/nginx/sbin/nginx /sbin/nginx)
+3.Tests nginx command:nginx -t(Tests the state of nginx and returns success if successful)
+:ansible all -m shell -a date
+4.Using the automation tool ansible to check whether the hosts can realize NTP time synchronization:ansible all -m shell -a 'date +%F\%T'
