@@ -1,0 +1,15 @@
+#建立zabbix_agentd的软链接
+cp /root/zabbix-3.4.4/misc/init.d/fedora/core/zabbix_agentd /etc/init.d/
+chmod +x /etc/init.d
+ln -s /usr/local/zabbix/sbin/* /usr/local/sbin/
+ln -s /usr/local/zabbix/bin/* /usr/local/sbin/
+
+#设置自启动
+vim /etc/rc.d/init.d/zabbix_agentd
+//在第二行添加如下内容
+chkconfig:2345 10 90
+description:zabbix agent
+//保存后退出文件
+chkconfig --add zabbix_agentd
+chkconfig zabbix_agentd on
+systemctl restart zabbix_agentd
